@@ -1,12 +1,10 @@
-# Perceptual Loss
-
 import torch
 import torch.nn as nn
 import torchvision.models as models
 from kornia import color
 
 vgg_model = models.vgg16(pretrained=True)
-#vgg_model.load_state_dict(torch.load("vgg16-397923af.pth"))
+
 for param in vgg_model.features.parameters():
     param.requires_grad = False
 if torch.cuda.is_available():

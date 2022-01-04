@@ -115,4 +115,5 @@ class Generator(nn.Module):
         x = self.decoder_block8(x)
         out = torch.tanh(x)
         return out
-        
+
+    

@@ -1,0 +1,3 @@
+test_dir : "test"
+outputs_dir : "outputs/results/testing"
+weights_dir : "weights"

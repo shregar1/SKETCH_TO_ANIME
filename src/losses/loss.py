@@ -3,6 +3,7 @@
 import torch
 import torch.nn as nn
 import torchvision.models as models
+from kornia import color
 
 vgg_model = models.vgg16(pretrained=True)
 #vgg_model.load_state_dict(torch.load("vgg16-397923af.pth"))
@@ -25,8 +26,10 @@ class LossModel(nn.Module):
         return output_activations
                 
 class PerceptualLoss():
-    def __init__(self,device):
+    def __init__(self,device, lambda_Con, lambda_Sty):
         self.device = device
+        self.lambda_Con = lambda_Con
+        self.lambda_Sty = lambda_Sty
         self.loss_model=LossModel()
         for param in self.loss_model.parameters():
             param.requires_grad = False
@@ -64,13 +67,15 @@ class PerceptualLoss():
         #Style Reconstruction Loss
         style_reconstruction_loss = self.sr_loss(out_style,out_target)
         
-        perceptual_loss = feature_reconstruction_loss + style_reconstruction_loss
+        perceptual_loss = self.lambda_Con*feature_reconstruction_loss + self.lambda_Sty*style_reconstruction_loss
         
         return perceptual_loss
         
 class ColorLoss():
-    def __init__(self,device):
+    def __init__(self,device, lambda_HSV, lambda_YUV):
         self.L1_loss = nn.L1Loss().to(device)
+        self.lambda_HSV = lambda_HSV
+        self.lambda_YUV = lambda_YUV
         self.Huber_loss = nn.SmoothL1Loss().to(device)
         
     def YUV_loss(self,y_true,y_pred):
@@ -93,5 +98,5 @@ class ColorLoss():
     def find(self,y_true,y_pred):
         y_true=(y_true+1)/2
         y_pred=(y_pred+1)/2
-        color_loss = self.YUV_loss(y_true,y_pred) + self.HSV_loss(y_true,y_pred)
+        color_loss = self.lambda_YUV*self.YUV_loss(y_true,y_pred) + self.lambda_HSV*self.HSV_loss(y_true,y_pred)
         return color_loss

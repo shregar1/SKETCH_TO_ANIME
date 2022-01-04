@@ -1,5 +1,16 @@
+import os
+import tqdm
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
+import matplotlib.pyplot as plt
+from torch.utils.data import DataLoader
+from src.data.dataset import ImageDataset
+from src.losses.loss import PerceptualLoss, ColorLoss
+
 class Trainer():
-    def __init__(self,device,dataset_dir,outputs_dir):
+    def __init__(self,device,dataset_dir,outputs_dir, G, D, lambda_L1, lambda_Per, lambda_Col, lambda_Con, lambda_Sty, lambda_HSV, lambda_YUV):
         
         #datloaders
         self.train_dataset = ImageDataset(root_dir=dataset_dir+"train",
@@ -11,13 +22,18 @@ class Trainer():
         self.val_dataset = ImageDataset(root_dir=dataset_dir+"val",
                                         image_size=512)
         self.val_dataloader = DataLoader(self.val_dataset,batch_size=1,shuffle=True)
+
+        self.G = G
+        self.D = D
         
         #optimizers
-        self.G_optimizer = optim.Adam(G.parameters(), lr=0.0002, betas=(0.5, 0.999))
-        self.D_optimizer = optim.Adam(D.parameters(), lr=0.0002, betas=(0.5, 0.999))
+        self.G_optimizer = optim.Adam(self.G.parameters(), lr=0.0002, betas=(0.5, 0.999))
+        self.D_optimizer = optim.Adam(self.D.parameters(), lr=0.0002, betas=(0.5, 0.999))
         
         #lambda
-        self.lambda_L1 = 100
+        self.lambda_L1 = lambda_L1
+        self.lambda_Per = lambda_Per
+        self.lambda_Col = lambda_Col
         
         #device
         self.device = device
@@ -25,60 +41,57 @@ class Trainer():
         #output_dir
         self.output_dir = outputs_dir
         
-        #loss
+        #losses
         self.BCE_loss = nn.BCELoss().to(self.device)
         self.L1_loss = nn.L1Loss().to(self.device)
-        
-    def train_fn(self,D,G):
+        self.P_Loss = PerceptualLoss(self.device, lambda_Con, lambda_Sty)
+        self.C_loss = ColorLoss(self.device, lambda_HSV, lambda_YUV)
+
+    def train_fn(self):
         print(len(self.train_dataloader))
         for i,(input_image,target_image) in enumerate(tqdm.tqdm(self.train_dataloader)):
             x = input_image.to(self.device)
             y = target_image.to(self.device)
             
             #train_discriminator
-            y_fake = G(x)
-            D_real = D(x,y)
-            D_fake = D(x,y_fake.detach())
+            y_fake = self.G(x)
+            D_real = self.D(x,y)
+            D_fake = self.D(x,y_fake.detach())
             D_real_loss = self.BCE_loss(D_real,torch.ones_like(D_real))
             D_fake_loss = self.BCE_loss(D_fake,torch.zeros_like(D_fake))
             
             #Discriminator loss
             D_loss = (D_real_loss + D_fake_loss)/2
             
-            D.zero_grad()
+            self.D.zero_grad()
             D_loss.backward()
             self.D_optimizer.step()
             
             #train_generator
-            y_fake = G(x)
-            D_fake = D(x,y_fake)
+            y_fake = self.G(x)
+            D_fake = self.D(x,y_fake)
             G_fake_loss = self.BCE_loss(D_fake,torch.ones_like(D_fake))
             G_L1_loss = self.L1_loss(y_fake,y)
             
-            #Total Variational loss
-            #reg_loss = 10e-4 * (torch.sum(torch.abs(y_fake[:, :, :, :-1] - y_fake[:, :, :, 1:])) + torch.sum(torch.abs(y_fake[:, :, :-1, :] - y_fake[:, :, 1:, :])))
-            
             #Perceptual loss
-            P_Loss = PerceptualLoss(self.device)
-            perceptual_loss = P_Loss.find(y,y,y_fake)
+            perceptual_loss = self.P_Loss.find(y,y,y_fake)
             
             #color loss
-            C_loss = ColorLoss(self.device)
-            color_loss = C_loss.find(y,y_fake)
+            color_loss = self.C_loss.find(y,y_fake)
             
             #Generator loss
-            G_loss = G_fake_loss + self.lambda_L1*G_L1_loss + perceptual_loss + 10*color_loss
+            G_loss = G_fake_loss + self.lambda_L1*G_L1_loss + self.lambda_P*perceptual_loss + self.Lambda_C*color_loss
             
-            G.zero_grad()
+            self.G.zero_grad()
             G_loss.backward()
             self.G_optimizer.step()
             
-    def save_examples(self,G,epoch,root_dir):
+    def save_examples(self,epoch):
         print("saving")
         for j,(input_images,target_images) in enumerate(self.val_dataloader):
             x = input_images.to("cuda:0")
-            fake_images = G(x)
-            G.zero_grad()
+            fake_images = self.G(x)
+            self.G.zero_grad()
             for i in range(len(fake_images)):
                 input_image = (np.transpose(input_images[i],(1,2,0))+1)/2
                 target_image = (np.transpose(target_images[i],(1,2,0))+1)/2
@@ -86,18 +99,16 @@ class Trainer():
                 fake_image = (fake_image+1)/2
                 output_image = np.concatenate([input_image,target_image,fake_image],axis=1)
                 file_name = "image_epoch-"+str(epoch)+"_sample-"+str(i)+".png"
-                file_path = os.path.join(root_dir,file_name)
-                plt.imshow(fake_image)
+                file_path = os.path.join(self.output_dir,file_name)
                 plt.imsave(file_path,output_image)
-                plt.show()
             break
         return
         
-    def fit(self, num_epochs,D,G):
-        G.to(self.device)
-        D.to(self.device)
-        G.train()
-        D.train()
+    def fit(self, num_epochs):
+        self.G.to(self.device)
+        self.D.to(self.device)
+        self.G.train()
+        self.D.train()
         
         train_hist = {}
         train_hist['D_losses'] = []
@@ -108,13 +119,14 @@ class Trainer():
         for epoch in range(num_epochs):
             print(epoch)
             #train
-            self.train_fn(D,G)
+            self.train_fn(self.D,self.G)
             
             #checkpointing
             if epoch % 1 == 0:
-                torch.save(G,"Generator_model_perceptual_color.pth")
-                torch.save(D,"Discriminator_model_perceptual_color.pth")
+                torch.save(self.G,"Generator_model_anime_2_sketch.pth")
+                torch.save(self.D,"Discriminator_model_anime_2_sketch.pth")
             #save examples
-            self.save_examples(G,epoch,self.output_dir)
+            self.save_examples(epoch)
         
+
         

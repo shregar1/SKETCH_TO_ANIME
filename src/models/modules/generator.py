@@ -1,3 +1,6 @@
+import torch.nn as nn
+from src.utils.utils import normal_init
+
 class Encoder_Block(nn.Module):
     def __init__(self,in_channels,out_channels,normalize=True,activation="leaky"):
         super(Encoder_Block,self).__init__()

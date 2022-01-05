@@ -1,0 +1,12 @@
+# Byte-compiled / optimized / DLL files
+__pycache__
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+*.log
+*.pyc
+*.cpython-39/
+.DS_Store
+*.pth
+**/__pycache__

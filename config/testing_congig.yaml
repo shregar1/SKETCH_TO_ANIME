@@ -1,3 +1,4 @@
 test_dir : "test"
 outputs_dir : "outputs/results/testing"
 weights_dir : "weights"
+G_filename : "Generator_model_anime_sketch_2_color.pth"
